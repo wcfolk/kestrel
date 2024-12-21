@@ -2,7 +2,24 @@ function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Run')
     .addItem('Sync', 'sync')
+    .addItem('Update External Share Expiry', 'updateExternalShareExpiry')
     .addToUi();
+}
+
+function updateExternalShareExpiry() {
+  const configData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config').getDataRange().getValues();
+  const rootFolderId = getConfigValue(configData, 'Data root folder');
+  const expiryTime = getConfigValue(configData, "Expiry Datetime")
+  const allFiles = recursiveDriveList(rootFolderId)
+  allFiles.forEach(f => {
+    const allPermissions = Drive.Permissions.list(f.id, { supportsAllDrives: true, fields: "*" })
+    const externalPermissionsNeedsUpdating = allPermissions.permissions
+      .filter(p => !p.emailAddress.includes("woodcraft.org.uk"))
+      .filter(p => p.expirationTime !== expiryTime)
+    externalPermissionsNeedsUpdating.forEach(p => {
+      Drive.Permissions.update({ role: p.role, expirationTime: expiryTime }, f.id, p.id, { supportsAllDrives: true })
+    })
+  })
 }
 
 
@@ -59,7 +76,7 @@ function sync() {
 
     templateData[0].forEach(template => {
       const file = DriveApp.getFileById(template)
-      const newName = applyTemplate(getConfigValue(configData,"District File Name Template"), [['%F', file.getName()],['%D', district[0]], ['%Y', year]])
+      const newName = applyTemplate(getConfigValue(configData, "District File Name Template"), [['%F', file.getName()], ['%D', district[0]], ['%Y', year]])
 
       createOrCopyFile(file, newName, districtFolder)
     })
@@ -149,6 +166,16 @@ function applyTemplate(template, substitutions) {
 
 function getConfigValue(configData, item) {
   return configData.find(i => i[0] === item)[1]
+}
+
+function recursiveDriveList(root) {
+  const list = Drive.Files.list({ q: `'${root}' in parents and trashed = false`, includeTeamDriveItems: true, supportsAllDrives: true, fields: "files(id, name, mimeType, permissionIds)" })
+  let results = list.files.filter(f => f.mimeType !== "application/vnd.google-apps.folder" && f.mimeType !== "application/vnd.google-apps.shortcut")
+  const folders = list.files.filter(f => f.mimeType == "application/vnd.google-apps.folder")
+  folders.forEach(f => {
+    results = [...results, ...recursiveDriveList(f.id)]
+  })
+  return results
 }
 
 const transpose = arr => arr.reduce((m, r) => (r.forEach((v, i) => (m[i] = (m[i] || []), m[i].push(v))), m), [])
