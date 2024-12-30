@@ -29,7 +29,7 @@ function sync() {
   const rootFolderId = getConfigValue(configData, 'Data root folder');
   const rootFolder = DriveApp.getFolderById(rootFolderId)
 
-  const templateData = transpose(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Templates').getDataRange().getValues())
+  const templateData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Templates').getDataRange().getValues()
 
   const districtData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Districts').getDataRange().getValues();
   const groupsData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Groups').getDataRange().getValues();
@@ -39,14 +39,11 @@ function sync() {
   //no headers
   districtData.shift()
   groupsData.shift()
-  templateData[0].shift() //district copy
-  templateData[1].shift() //district shortcut
-  templateData[2].shift() //group copy
-  templateData[3].shift() //group shortcut
+  templateData.shift() //district copy
 
   // Check if all groups have a district
   groupsData.forEach(group => {
-    const district = districtData.find(d => d[0] === group[1]);
+    const district = districtData.find(d => d[0] === group[2]);
     if (!district) {
       console.log('District not found for group', group)
       throw new Error('District not found for group')
@@ -59,30 +56,34 @@ function sync() {
 
   districtData.forEach(district => {
 
-    const districtFolderName = applyTemplate(getConfigValue(configData, "District Folder Name Template"), [['%D', district[0]], ['%Y', year]])
+    const name = district[0]
+    const number = district[1]
+    const email = district[2]
+
+    const districtFolderName = applyTemplate(getConfigValue(configData, "District Folder Name Template"), [['%D', name], ['%N', number], ['%Y', year]])
     const districtFolder = createOrGetFolder(districtFolderName, rootFolder)
-    districtFolders[district[0]] = districtFolder
+    districtFolders[name] = districtFolder
 
     const editors = districtFolder.getEditors()
 
-    if (editors.find(e => e.getEmail() === district[1])) {
-      console.log('District folder already shared with', district[1])
+    if (editors.find(e => e.getEmail() === email)) {
+      console.log('District folder already shared with', email)
     } else {
-      districtFolder.addEditor(district[1])
-      console.log('Sharing District folder with', district[1])
+      districtFolder.addEditor(email)
+      console.log('Sharing District folder with', email)
     }
 
     console.log('District folder created, copying templates', districtFolder.getId())
 
-    templateData[0].forEach(template => {
-      const file = DriveApp.getFileById(template)
-      const newName = applyTemplate(getConfigValue(configData, "District File Name Template"), [['%F', file.getName()], ['%D', district[0]], ['%Y', year]])
+    templateData.filter(r => r[1] === "district" && r[2] === "copy").forEach(template => {
+      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
+      const newName = applyTemplate(template[3], [['%F', file.getName()], ['%D', name], ['%N', number], ['%Y', year]])
 
       createOrCopyFile(file, newName, districtFolder)
     })
 
-    templateData[1].forEach(template => {
-      const file = DriveApp.getFileById(template)
+    templateData.filter(r => r[1] === "district" && r[2] === "shortcut").forEach(template => {
+      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
       createShortcutIfMissing(file, districtFolder)
     })
 
@@ -91,30 +92,34 @@ function sync() {
 
   // Create group folders
   groupsData.forEach(group => {
-    const districtFolder = districtFolders[group[1]]
-    const groupFolderName = applyTemplate(getConfigValue(configData, "Group Folder Name Template"), [['%G', group[0]], ['%D', group[1]], ['%Y', year]])
+    const name = group[0]
+    const number = group[1]
+    const district = group[2]
+    const email = group[3]
+    const districtFolder = districtFolders[district]
+    const groupFolderName = applyTemplate(getConfigValue(configData, "Group Folder Name Template"), [['%G', name], ['%N', number], ['%D', district], ['%Y', year]])
     const groupFolder = createOrGetFolder(groupFolderName, districtFolder)
 
     const editors = groupFolder.getEditors()
 
-    if (editors.find(e => e.getEmail() === group[2])) {
-      console.log('Group folder already shared with', group[2])
+    if (editors.find(e => e.getEmail() === email)) {
+      console.log('Group folder already shared with', email)
     } else {
-      groupFolder.addEditor(group[2])
-      console.log('Sharing Group folder with', group[2])
+      groupFolder.addEditor(email)
+      console.log('Sharing Group folder with', email)
     }
 
     console.log('Group folder created, copying templates', groupFolder.getId())
 
-    templateData[2].forEach(template => {
-      const file = DriveApp.getFileById(template)
-      const newName = applyTemplate(getConfigValue(configData, "Group File Name Template"), [['%F', file.getName()], ['%G', group[0]], ['%D', group[1]], ['%Y', year]])
+    templateData.filter(r => r[1] === "group" && r[2] === "copy").forEach(template => {
+      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
+      const newName = applyTemplate(template[3], [['%F', file.getName()], ['%G', name], ['%N', number], ['%D', district], ['%Y', year]])
 
       createOrCopyFile(file, newName, groupFolder)
     })
 
-    templateData[3].forEach(template => {
-      const file = DriveApp.getFileById(template)
+    templateData.filter(r => r[1] === "group" && r[2] === "shortcut").forEach(template => {
+      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
       createShortcutIfMissing(file, groupFolder)
     })
 
@@ -178,4 +183,9 @@ function recursiveDriveList(root) {
   return results
 }
 
-const transpose = arr => arr.reduce((m, r) => (r.forEach((v, i) => (m[i] = (m[i] || []), m[i].push(v))), m), [])
+function getIdFromUrl(url) {
+  const pattern = /\/d\/([^\/\\]+)(?:\/|$)/i;
+  return pattern.test(url || '')
+    ? url.match(pattern)[1]
+    : null;
+}
