@@ -12,12 +12,12 @@ function updateExternalShareExpiry() {
   const expiryTime = getConfigValue(configData, "Expiry Datetime")
   const allFiles = recursiveDriveList(rootFolderId)
   allFiles.forEach(f => {
-    const allPermissions = Drive.Permissions.list(f.id, { supportsAllDrives: true, fields: "*" })
+    const allPermissions = Drive.Permissions.list(f.id, { supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "*" })
     const externalPermissionsNeedsUpdating = allPermissions.permissions
       .filter(p => !p.emailAddress.includes("woodcraft.org.uk"))
       .filter(p => p.expirationTime !== expiryTime)
     externalPermissionsNeedsUpdating.forEach(p => {
-      Drive.Permissions.update({ role: p.role, expirationTime: expiryTime }, f.id, p.id, { supportsAllDrives: true })
+      Drive.Permissions.update({ role: p.role, expirationTime: expiryTime }, f.id, p.id, { supportsAllDrives: true, includeItemsFromAllDrives: true })
     })
   })
 }
@@ -27,19 +27,19 @@ function sync() {
   // Load some data
   const configData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config').getDataRange().getValues();
   const rootFolderId = getConfigValue(configData, 'Data root folder');
-  const rootFolder = DriveApp.getFolderById(rootFolderId)
+  const rootFolder = Drive.Files.get(rootFolderId, {supportsAllDrives: true, includeItemsFromAllDrives: true})
 
   const templateData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Templates').getDataRange().getValues()
 
-  const districtData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Districts').getDataRange().getValues();
-  const groupsData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Groups').getDataRange().getValues();
+  const districtData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Districts').getDataRange().getValues().filter(r => r[0] !== '')
+  const groupsData = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Groups').getDataRange().getValues().filter(r => r[0] !== '')
 
   const year = new Date().getFullYear()
 
   //no headers
   districtData.shift()
   groupsData.shift()
-  templateData.shift() //district copy
+  templateData.shift()
 
   // Check if all groups have a district
   groupsData.forEach(group => {
@@ -64,26 +64,26 @@ function sync() {
     const districtFolder = createOrGetFolder(districtFolderName, rootFolder)
     districtFolders[name] = districtFolder
 
-    const editors = districtFolder.getEditors()
+    const permissions = Drive.Permissions.list(districtFolder.id, {supportsAllDrives: true, includeItemsFromAllDrives: true, fields:'*'})
 
-    if (editors.find(e => e.getEmail() === email)) {
+    if (permissions.permissions.find(e => e.emailAddress === email)) {
       console.log('District folder already shared with', email)
     } else {
-      districtFolder.addEditor(email)
+      Drive.Permissions.create({type: 'user', role: 'writer', emailAddress: email}, districtFolder.id, {supportsAllDrives: true, includeItemsFromAllDrives: true})
       console.log('Sharing District folder with', email)
     }
 
-    console.log('District folder created, copying templates', districtFolder.getId())
+    console.log('District folder created, copying templates', districtFolder.id)
 
     templateData.filter(r => r[1] === "district" && r[2] === "copy").forEach(template => {
-      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
-      const newName = applyTemplate(template[3], [['%F', file.getName()], ['%D', name], ['%N', number], ['%Y', year]])
+      const file = Drive.Files.get(getIdFromUrl(template[0]), {supportsAllDrives: true, includeItemsFromAllDrives: true})
+      const newName = applyTemplate(template[3], [['%F', file.name], ['%D', name], ['%N', number], ['%Y', year]])
 
       createOrCopyFile(file, newName, districtFolder)
     })
 
     templateData.filter(r => r[1] === "district" && r[2] === "shortcut").forEach(template => {
-      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
+      const file = Drive.Files.get(getIdFromUrl(template[0]), {supportsAllDrives: true, includeItemsFromAllDrives: true})
       createShortcutIfMissing(file, districtFolder)
     })
 
@@ -100,26 +100,26 @@ function sync() {
     const groupFolderName = applyTemplate(getConfigValue(configData, "Group Folder Name Template"), [['%G', name], ['%N', number], ['%D', district], ['%Y', year]])
     const groupFolder = createOrGetFolder(groupFolderName, districtFolder)
 
-    const editors = groupFolder.getEditors()
+    const permissions = Drive.Permissions.list(groupFolder.id, {supportsAllDrives: true, includeItemsFromAllDrives: true, fields:'*'})
 
-    if (editors.find(e => e.getEmail() === email)) {
+    if (permissions.permissions.find(e => e.emailAddress === email)) {
       console.log('Group folder already shared with', email)
     } else {
-      groupFolder.addEditor(email)
+      Drive.Permissions.create({type: 'user', role: 'writer', emailAddress: email}, groupFolder.id, {supportsAllDrives: true, includeItemsFromAllDrives: true})
       console.log('Sharing Group folder with', email)
     }
 
-    console.log('Group folder created, copying templates', groupFolder.getId())
+    console.log('Group folder created, copying templates', groupFolder.id)
 
     templateData.filter(r => r[1] === "group" && r[2] === "copy").forEach(template => {
-      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
+      const file = Drive.Files.get(getIdFromUrl(template[0]), {supportsAllDrives: true, includeItemsFromAllDrives: true})
       const newName = applyTemplate(template[3], [['%F', file.getName()], ['%G', name], ['%N', number], ['%D', district], ['%Y', year]])
 
       createOrCopyFile(file, newName, groupFolder)
     })
 
     templateData.filter(r => r[1] === "group" && r[2] === "shortcut").forEach(template => {
-      const file = DriveApp.getFileById(getIdFromUrl(template[0]))
+      const file = Drive.Files.get(getIdFromUrl(template[0]), {supportsAllDrives: true, includeItemsFromAllDrives: true})
       createShortcutIfMissing(file, groupFolder)
     })
 
@@ -128,40 +128,40 @@ function sync() {
 }
 
 function createOrGetFolder(name, parent) {
-  const query = `title = '${name}' and '${parent.getId()}' in parents and trashed = false`
-  const folderSearch = parent.searchFolders(query);
+  const query = `name = '${name}' and '${parent.getId()}' in parents and trashed = false`
+  const list = Drive.Files.list({ q: query, supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name, mimeType)" })
 
-  if (folderSearch.hasNext()) {
+  if (list.files.length > 0) {
     console.log('Folder already exists', name)
-    return folderSearch.next()
+    return list.files[0]
   } else {
     console.log('Creating folder', name)
-    return parent.createFolder(name)
+    return Drive.Files.create({name: name, mimeType: 'application/vnd.google-apps.folder', parents: [parent.id]}, null, {supportsAllDrives: true})
   }
 }
 
 function createOrCopyFile(file, newName, parent) {
-  const query = `title = '${newName}' and '${parent.getId()}' in parents and trashed = false`
-  const fileSearch = parent.searchFiles(query);
+  const query = `name = '${newName}' and '${parent.getId()}' in parents and trashed = false`
+  const list = Drive.Files.list({ q: query, supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name, mimeType)" })
 
-  if (fileSearch.hasNext()) {
+  if (list.files.length > 0) {
     console.log('File already exists', newName)
-    return fileSearch.next()
+    return list.files[0]
   } else {
     console.log('Creating file', newName)
-    file.makeCopy(newName, parent)
+    Drive.Files.copy({name: newName, parents:[parent.id]}, file.id, {supportsAllDrives: true, includeItemsFromAllDrives: true})
   }
 }
 
 function createShortcutIfMissing(file, parent) {
-  const query = `title = '${file.getName()}' and '${parent.getId()}' in parents and trashed = false`
-  const templateFileSearch = parent.searchFiles(query);
+  const query = `name = '${file.name}' and '${parent.getId()}' in parents and trashed = false`
+  const list = Drive.Files.list({ q: query, supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name, mimeType)" })
 
-  if (templateFileSearch.hasNext()) {
+  if (list.files.length > 0) {
     console.log('Shortcut already exists for ', file.getName())
   } else {
     console.log('Creating shortcut', file.getName())
-    parent.createShortcut(file.getId())
+    Drive.Files.create({'name': file.name,'mimeType': 'application/vnd.google-apps.shortcut', parents: [parent.id], 'shortcutDetails': {'targetId': file.id}}, null, {supportsAllDrives: true, includeItemsFromAllDrives: true})
   }
 }
 
@@ -174,7 +174,7 @@ function getConfigValue(configData, item) {
 }
 
 function recursiveDriveList(root) {
-  const list = Drive.Files.list({ q: `'${root}' in parents and trashed = false`, includeTeamDriveItems: true, supportsAllDrives: true, fields: "files(id, name, mimeType, permissionIds)" })
+  const list = Drive.Files.list({ q: `'${root}' in parents and trashed = false`, supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name, mimeType, permissionIds)" })
   let results = list.files.filter(f => f.mimeType !== "application/vnd.google-apps.folder" && f.mimeType !== "application/vnd.google-apps.shortcut")
   const folders = list.files.filter(f => f.mimeType == "application/vnd.google-apps.folder")
   folders.forEach(f => {
