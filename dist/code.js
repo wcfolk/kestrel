@@ -149,7 +149,12 @@ function createOrCopyFile(file, newName, parent) {
     return list.files[0]
   } else {
     console.log('Creating file', newName)
-    Drive.Files.copy({name: newName, parents:[parent.id]}, file.id, {supportsAllDrives: true, includeItemsFromAllDrives: true})
+    const newFile = Drive.Files.copy({name: newName, parents:[parent.id]}, file.id, {supportsAllDrives: true, includeItemsFromAllDrives: true})
+    if(newFile.mimeType === "application/vnd.google-apps.form") {
+      const form = FormApp.openById(newFile.id)
+      const spreadsheet = Drive.Files.create({name: `${newName} - Responses`, parents:[parent.id], mimeType: 'application/vnd.google-apps.spreadsheet'}, null,{supportsAllDrives: true, includeItemsFromAllDrives: true})
+      form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheet.id)
+    }
   }
 }
 
