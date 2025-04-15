@@ -111,11 +111,13 @@ function sync() {
 
     console.log('Group folder created, copying templates', groupFolder.id)
 
+    const copiedFiles = []
+
     templateData.filter(r => r[1] === "group" && r[2] === "copy").forEach(template => {
       const file = Drive.Files.get(getIdFromUrl(template[0]), {supportsAllDrives: true, includeItemsFromAllDrives: true})
       const newName = applyTemplate(template[3], [['%F', file.getName()], ['%G', name], ['%N', number], ['%D', district], ['%Y', year]])
 
-      createOrCopyFile(file, newName, groupFolder)
+      createOrCopyFile(file, newName, groupFolder, copiedFiles, template[4])
     })
 
     templateData.filter(r => r[1] === "group" && r[2] === "shortcut").forEach(template => {
@@ -140,20 +142,32 @@ function createOrGetFolder(name, parent) {
   }
 }
 
-function createOrCopyFile(file, newName, parent) {
+function createOrCopyFile(file, newName, parent, copiedFiles = [], flags) {
   const query = `name = '${newName}' and '${parent.getId()}' in parents and trashed = false`
   const list = Drive.Files.list({ q: query, supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name, mimeType)" })
 
   if (list.files.length > 0) {
     console.log('File already exists', newName)
+    copiedFiles.push(list.files[0])
     return list.files[0]
   } else {
     console.log('Creating file', newName)
     const newFile = Drive.Files.copy({name: newName, parents:[parent.id]}, file.id, {supportsAllDrives: true, includeItemsFromAllDrives: true})
-    if(newFile.mimeType === "application/vnd.google-apps.form") {
+    copiedFiles.push(newFile)
+    if(flags & 1) {
       const form = FormApp.openById(newFile.id)
-      const spreadsheet = Drive.Files.create({name: `${newName} - Responses`, parents:[parent.id], mimeType: 'application/vnd.google-apps.spreadsheet'}, null,{supportsAllDrives: true, includeItemsFromAllDrives: true})
+      const spreadsheet = copiedFiles[copiedFiles.length - 2]
       form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheet.id)
+      const responsesSheet = SpreadsheetApp.openById(spreadsheet.id)
+      const formResponses = responsesSheet.getSheetByName("Form Responses 1").activate()
+      console.log('Current index of sheet: %s', formResponses.getIndex());
+      responsesSheet.moveActiveSheet(2)
+      console.log('New index of sheet: %s', formResponses.getIndex());
+    }
+    if(flags & 2) {
+      const spreadsheetToLoadFrom = copiedFiles[copiedFiles.length - 3]
+      const register = SpreadsheetApp.openById(newFile.id)
+      register.getActiveSheet().getRange(1,2).setValues([[spreadsheetToLoadFrom.id]])
     }
   }
 }
